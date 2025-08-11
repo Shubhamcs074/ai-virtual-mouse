@@ -5,12 +5,19 @@ import numpy as np
 import math
 import threading
 import tkinter as tk
+import matplotlib.pyplot as plt
 
-# Global toggle flag
+
 mouse_control_enabled = False
 dragging = False
 screen_w, screen_h = pyautogui.size()
 pinch_threshold = 40
+# Accuracy tracking variables
+total_frames = 0
+successful_detections = 0
+pinch_detections = 0
+palm_open_detections = 0
+
 
 
 def get_landmark_positions(hand_landmarks, w, h):
@@ -50,7 +57,7 @@ def stop_drag(frame, pos):
 
 
 def virtual_mouse_loop():
-    global dragging, mouse_control_enabled
+    global dragging, mouse_control_enabled, total_frames, successful_detections, pinch_detections, palm_open_detections
 
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(max_num_hands=1)
@@ -74,6 +81,8 @@ def virtual_mouse_loop():
         if not success:
             break
 
+        total_frames += 1
+
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(rgb)
@@ -81,9 +90,11 @@ def virtual_mouse_loop():
         h, w, _ = frame.shape
 
         if results.multi_hand_landmarks:
+            successful_detections += 1
             for hand_landmarks in results.multi_hand_landmarks:
                 mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                 if is_palm_open(hand_landmarks):
+                    palm_open_detections += 1
                     cv2.putText(frame, 'FROZEN', (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
                     continue
                 index_tip, thumb_tip = get_landmark_positions(hand_landmarks, w, h)
@@ -96,6 +107,7 @@ def virtual_mouse_loop():
                     move_cursor(index_tip, frame.shape)
 
                     if is_pinching(index_tip, thumb_tip):
+                        pinch_detections += 1
                         if not dragging:
                             start_drag(frame, index_tip)
                     else:
@@ -104,14 +116,37 @@ def virtual_mouse_loop():
 
         status = "ON" if mouse_control_enabled else "OFF"
         cv2.putText(frame, f'Mouse Control: {status}', (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0) if mouse_control_enabled else (0, 0, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0) if mouse_control_enabled else (0, 0, 255), 1)
 
-        cv2.imshow("AI Virtual Mouse - GUI Toggle", frame)
+        cv2.imshow("AI Virtual Mouse - GUI Toggle", frame) 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    
+
     cap.release()
     cv2.destroyAllWindows()
+    show_accuracy_graph()
+
+def show_accuracy_graph():
+    detection_accuracy = (successful_detections / total_frames) * 100 if total_frames else 0
+    pinch_accuracy = (pinch_detections / successful_detections) * 100 if successful_detections else 0
+    palm_accuracy = (palm_open_detections / successful_detections) * 100 if successful_detections else 0
+
+    print(f"\n--- AI Virtual Mouse Accuracy Report ---")
+    print(f"Overall Hand Detection Accuracy: {detection_accuracy:.2f}%")
+    print(f"Pinch Gesture Accuracy: {pinch_accuracy:.2f}%")
+    print(f"Palm Open Gesture Accuracy: {palm_accuracy:.2f}%\n")
+
+    labels = ['Hand Detection', 'Pinch', 'Palm Open']
+    accuracies = [detection_accuracy, pinch_accuracy, palm_accuracy]
+
+    plt.bar(labels, accuracies, color=['blue', 'green', 'orange'])
+    plt.ylabel("Accuracy (%)")
+    plt.title("AI Virtual Mouse Sensitivity & Accuracy")
+    plt.ylim(0, 100)
+    plt.show()
+
 
 
 def run_gui():
@@ -138,7 +173,5 @@ def run_gui():
 
 
 if __name__ == "__main__":
-    # Launch the OpenCV loop in a thread
     threading.Thread(target=virtual_mouse_loop, daemon=True).start()
-    # Launch GUI in main thread
     run_gui()
